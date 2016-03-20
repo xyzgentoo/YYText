@@ -37,6 +37,23 @@ static inline UIEdgeInsets UIEdgeInsetRotateVertical(UIEdgeInsets insets) {
     return one;
 }
 
+/**
+ Sometimes CoreText may convert CGColor to UIColor for `kCTForegroundColorAttributeName`
+ attribute in iOS7. This should be a bug of CoreText, and may cause crash. Here's a workaround.
+ */
+static CGColorRef YYTextGetCGColor(CGColorRef color) {
+    static UIColor *defaultColor;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        defaultColor = [UIColor blackColor];
+    });
+    if (!color) return defaultColor.CGColor;
+    if ([((__bridge NSObject *)color) respondsToSelector:@selector(CGColor)]) {
+        return ((__bridge UIColor *)color).CGColor;
+    }
+    return color;
+}
+
 @implementation YYTextLinePositionSimpleModifier
 - (void)modifyLines:(NSArray *)lines fromText:(NSAttributedString *)text inContainer:(YYTextContainer *)container {
     if (container.verticalForm) {
@@ -384,8 +401,8 @@ dispatch_semaphore_signal(_lock);
     static BOOL needFixJoinedEmojiBug = NO;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        CGFloat systemVersionFloat = [UIDevice currentDevice].systemVersion.floatValue;
-        if (8.3 <= systemVersionFloat && systemVersionFloat < 9) {
+        double systemVersionDouble = [UIDevice currentDevice].systemVersion.doubleValue;
+        if (8.3 <= systemVersionDouble && systemVersionDouble < 9) {
             needFixJoinedEmojiBug = YES;
         }
     });
@@ -619,8 +636,8 @@ dispatch_semaphore_signal(_lock);
         size.height += rect.origin.y;
         if (size.width < 0) size.width = 0;
         if (size.height < 0) size.height = 0;
-        size.width = ceil(size.width);
-        size.height = ceil(size.height);
+        size.width = YYTextCGFloatPixelCeil(size.width);
+        size.height = YYTextCGFloatPixelCeil(size.height);
         textBoundingSize = size;
     }
     
@@ -2193,7 +2210,7 @@ static void YYTextDrawRun(YYTextLine *line, CTRunRef run, CGContextRef context, 
         CTRunGetPositions(run, CFRangeMake(0, 0), glyphPositions);
         
         CGColorRef fillColor = (CGColorRef)CFDictionaryGetValue(runAttrs, kCTForegroundColorAttributeName);
-        if (!fillColor) fillColor = [UIColor blackColor].CGColor;
+        fillColor = YYTextGetCGColor(fillColor);
         NSNumber *strokeWidth = CFDictionaryGetValue(runAttrs, kCTStrokeWidthAttributeName);
         
         CGContextSaveGState(context); {
@@ -2793,20 +2810,6 @@ static void YYTextDrawDecoration(YYTextLayout *layout, CGContextRef context, CGS
             if (glyphCount == 0) continue;
             
             NSDictionary *attrs = (id)CTRunGetAttributes(run);
-            
-            /*
-             Sometimes CoreText may convert CGColor to UIColor for `kCTForegroundColorAttributeName`
-             attribute in iOS7. This should be a bug of CoreText, and may cause crash. Here's a workaround.
-             */
-            NSObject *tmpColor = attrs[(id)kCTForegroundColorAttributeName];
-            if ([tmpColor respondsToSelector:@selector(CGColor)]) {
-                CGColorRef cgColor = ((UIColor *)tmpColor).CGColor;
-                if (!cgColor) cgColor = [UIColor blackColor].CGColor;
-                NSMutableDictionary *tmpAttrs = attrs.mutableCopy;
-                tmpAttrs[(id)kCTForegroundColorAttributeName] = (__bridge id)(cgColor);
-                attrs = tmpAttrs;
-            }
-            
             YYTextDecoration *underline = attrs[YYTextUnderlineAttributeName];
             YYTextDecoration *strikethrough = attrs[YYTextStrikethroughAttributeName];
             
@@ -2852,8 +2855,10 @@ static void YYTextDrawDecoration(YYTextLayout *layout, CGContextRef context, CGS
             
             if (needDrawUnderline) {
                 CGColorRef color = underline.color.CGColor;
-                if (!color) color = (__bridge CGColorRef)(attrs[(id)kCTForegroundColorAttributeName]);
-                if (!color) color = [UIColor blackColor].CGColor;
+                if (!color) {
+                    color = (__bridge CGColorRef)(attrs[(id)kCTForegroundColorAttributeName]);
+                    color = YYTextGetCGColor(color);
+                }
                 CGFloat thickness = underline.width ? underline.width.floatValue : lineThickness;
                 YYTextShadow *shadow = underline.shadow;
                 while (shadow) {
@@ -2879,8 +2884,10 @@ static void YYTextDrawDecoration(YYTextLayout *layout, CGContextRef context, CGS
             
             if (needDrawStrikethrough) {
                 CGColorRef color = strikethrough.color.CGColor;
-                if (!color) color = (__bridge CGColorRef)(attrs[(id)kCTForegroundColorAttributeName]);
-                if (!color) color = [UIColor blackColor].CGColor;
+                if (!color) {
+                    color = (__bridge CGColorRef)(attrs[(id)kCTForegroundColorAttributeName]);
+                    color = YYTextGetCGColor(color);
+                }
                 CGFloat thickness = strikethrough.width ? strikethrough.width.floatValue : lineThickness;
                 YYTextShadow *shadow = underline.shadow;
                 while (shadow) {
